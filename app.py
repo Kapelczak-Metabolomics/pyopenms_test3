@@ -249,7 +249,7 @@ if uploaded_mzml is not None:
         )  
         st.plotly_chart(fig_xic, use_container_width=True)  
           
-        # MS2 Spectrum Display  
+        # MS2 Spectrum Display with Centroid Bars  
         st.header("MS2 Fragmentation Analysis")  
         ms2_data = extract_ms2_data(experiment)  
         if ms2_data:  
@@ -261,23 +261,26 @@ if uploaded_mzml is not None:
               
             # Validate and plot the selected MS2 spectrum  
             if len(selected_ms2['mz']) > 0 and len(selected_ms2['intensity']) > 0:  
-                # Plot MS2 spectrum  
+                # Plot MS2 spectrum using bar chart for centroid representation  
                 fig_ms2 = go.Figure()  
-                # Use scatter plot with markers for better visualization of MS2 peaks  
-                fig_ms2.add_trace(go.Scatter(  
+                  
+                # Use bar chart for centroid representation  
+                fig_ms2.add_trace(go.Bar(  
                     x=selected_ms2['mz'],  
                     y=selected_ms2['intensity'],  
-                    mode='markers',  
-                    marker=dict(color="#B2EB24", size=8),  
+                    marker=dict(color="#B2EB24", line=dict(width=0)),  
+                    width=0.5,  # Adjust width of bars for better visualization  
                     name="MS2 Peaks"  
                 ))  
+                  
                 fig_ms2.update_layout(  
                     title={"text": "MS2 Fragmentation Spectrum", "pad": {"t":15}},  
                     xaxis_title="m/z",  
                     yaxis_title="Intensity",  
                     template="simple_white",  
                     xaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
-                    yaxis=dict(showgrid=True, gridcolor="#F3F4F6")  
+                    yaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
+                    bargap=0.99  # Adjust gap between bars  
                 )  
                 st.plotly_chart(fig_ms2, use_container_width=True)  
             else:  
@@ -313,12 +316,12 @@ if uploaded_mzml is not None:
                                 # Plot matches on the MS2 spectrum  
                                 fig_match = go.Figure()  
                                   
-                                # Plot all MS2 peaks  
-                                fig_match.add_trace(go.Scatter(  
+                                # Plot all MS2 peaks as bars  
+                                fig_match.add_trace(go.Bar(  
                                     x=selected_ms2['mz'],  
                                     y=selected_ms2['intensity'],  
-                                    mode='markers',  
-                                    marker=dict(color="#B2EB24", size=8),  
+                                    marker=dict(color="#B2EB24", line=dict(width=0)),  
+                                    width=0.5,  
                                     name="MS2 Peaks"  
                                 ))  
                                   
@@ -326,16 +329,12 @@ if uploaded_mzml is not None:
                                 matched_mz = [selected_ms2['mz'][i] for i in match_results['ms2_indices']]  
                                 matched_intensity = [selected_ms2['intensity'][i] for i in match_results['ms2_indices']]  
                                   
-                                fig_match.add_trace(go.Scatter(  
+                                # Add matched peaks as a separate bar trace with different color  
+                                fig_match.add_trace(go.Bar(  
                                     x=matched_mz,  
                                     y=matched_intensity,  
-                                    mode='markers',  
-                                    marker=dict(  
-                                        color="#EB3424",  
-                                        size=12,  
-                                        line=dict(width=2, color="#EB3424"),  
-                                        symbol="circle-open"  
-                                    ),  
+                                    marker=dict(color="#EB3424", line=dict(width=1, color="#EB3424")),  
+                                    width=0.5,  
                                     name="Matched Fragments"  
                                 ))  
                                   
@@ -345,7 +344,9 @@ if uploaded_mzml is not None:
                                     yaxis_title="Intensity",  
                                     template="simple_white",  
                                     xaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
-                                    yaxis=dict(showgrid=True, gridcolor="#F3F4F6")  
+                                    yaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
+                                    bargap=0.99,  
+                                    barmode='overlay'  # Overlay bars for better visualization of matches  
                                 )  
                                 st.plotly_chart(fig_match, use_container_width=True)  
                                   
