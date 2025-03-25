@@ -1,0 +1,9 @@
+streamlit  
+plotly  
+pyopenms  
+reportlab  
+pandas  
+numpy
+kaleido
+fpdf
+python-docx
