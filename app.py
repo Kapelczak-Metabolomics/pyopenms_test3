@@ -23,8 +23,8 @@ except ImportError:
 st.set_page_config(page_title="PyOpenMS Mass Spectrometry Analyzer", layout="wide")  
 st.title("Mass Spectrometry Data Analysis")  
 st.markdown(  
-    "Upload an mzML file to analyze your mass spectrometry data: view the Total Ion Chromatogram (TIC), extract an XIC, "  
-    "explore MS2 spectra, and match fragmentation against a user-uploaded MGF file."  
+    "Upload an mzML file to analyze your mass spectrometry data: view the Total Ion Chromatogram (TIC), "  
+    "extract an XIC, explore MS2 spectra, and match fragmentation against a user-uploaded MGF file."  
 )  
   
 # -------------------------------------------------------------------  
@@ -32,7 +32,7 @@ st.markdown(
   
 def load_mzml(uploaded_file):  
     """  
-    Writes the uploaded mzML file to a temporary file and loads it  
+    Writes the uploaded mzML file to a temporary file and loads it   
     into an MSExperiment using pyopenms MzMLFile.load.  
     """  
     experiment = MSExperiment()  
@@ -70,16 +70,19 @@ def extract_tic(experiment):
   
 def extract_xic(experiment, mass, tol=0.5):  
     """  
-    Extracts an Extracted Ion Chromatogram (XIC) for a given mass with tolerance.  
-    Returns numpy arrays of retention times and summed intensities within the mass window.  
+    Extracts an Extracted Ion Chromatogram (XIC) from an MSExperiment.  
+    Returns numpy arrays of retention times and intensities for the specified m/z.  
     """  
     times, intensities = [], []  
     for spectrum in experiment:  
         if spectrum.getMSLevel() == 1:  
             time = spectrum.getRT()  
             mz_array, intensity_array = spectrum.get_peaks()  
-            mask = (mz_array >= mass - tol) & (mz_array <= mass + tol)  
-            intensity = np.sum(intensity_array[mask]) if np.any(mask) else 0.0  
+              
+            # Find peaks within the tolerance range  
+            matches = np.where(np.abs(mz_array - mass) <= tol)[0]  
+            intensity = sum(intensity_array[matches]) if matches.size > 0 else 0.0  
+              
             times.append(time)  
             intensities.append(intensity)  
     return np.array(times), np.array(intensities)  
@@ -96,67 +99,69 @@ def extract_ms2_data(experiment):
             if precursors:  
                 precursor_mz = precursors[0].getMZ()  
                 mz_array, intensity_array = spectrum.get_peaks()  
-                ms2_data.append({  
-                    'index': i,  
-                    'rt': spectrum.getRT(),  
-                    'precursor': precursor_mz,  
-                    'mz': mz_array,  
-                    'intensity': intensity_array  
-                })  
+                  
+                # Only add if we have valid data  
+                if len(mz_array) > 0 and len(intensity_array) > 0:  
+                    ms2_data.append({  
+                        'index': i,  
+                        'rt': spectrum.getRT(),  
+                        'precursor': precursor_mz,  
+                        'mz': mz_array,  
+                        'intensity': intensity_array  
+                    })  
     return ms2_data  
   
-def parse_mgf(mgf_bytes):  
+def parse_mgf(mgf_content):  
     """  
-    Parses an MGF file from bytes.  
-    Returns a list of dictionaries containing MGF records.  
+    Parses an MGF file content and returns a list of records.  
+    Each record contains the peptide sequence, charge, and m/z array.  
     """  
-    mgf_records = []  
-    try:  
-        mgf_text = mgf_bytes.decode('utf-8')  
-        # Split by BEGIN IONS/END IONS blocks  
-        blocks = re.split(r'BEGIN IONS|END IONS', mgf_text)  
-        for i in range(1, len(blocks), 2):  
-            if i < len(blocks):  
-                block = blocks[i].strip()  
-                record = {}  
-                mz_values = []  
-                intensity_values = []  
-                  
-                lines = block.split('\n')  
-                for line in lines:  
-                    line = line.strip()  
-                    if not line:  
-                        continue  
-                      
-                    # Parse metadata lines (e.g., PEPMASS, CHARGE)  
-                    if '=' in line:  
-                        key, value = line.split('=', 1)  
-                        record[key.lower()] = value  
-                    # Parse peak lines (m/z intensity pairs)  
-                    elif ' ' in line:  
-                        parts = line.split()  
-                        if len(parts) >= 2:  
-                            try:  
-                                mz = float(parts[0])  
-                                intensity = float(parts[1])  
-                                mz_values.append(mz)  
-                                intensity_values.append(intensity)  
-                            except ValueError:  
-                                pass  
-                  
-                if mz_values and intensity_values:  
-                    record['mz_array'] = np.array(mz_values)  
-                    record['intensity_array'] = np.array(intensity_values)  
-                    mgf_records.append(record)  
-    except Exception as e:  
-        st.error(f"Error parsing MGF file: {str(e)}")  
+    records = []  
+    current_record = None  
       
-    return mgf_records  
+    for line in mgf_content.split('\n'):  
+        line = line.strip()  
+        if not line:  
+            continue  
+              
+        if line == "BEGIN IONS":  
+            current_record = {  
+                'title': '',  
+                'peptide': '',  
+                'charge': 0,  
+                'mz_array': [],  
+                'intensity_array': []  
+            }  
+        elif line == "END IONS":  
+            if current_record:  
+                records.append(current_record)  
+                current_record = None  
+        elif current_record:  
+            if line.startswith("TITLE="):  
+                current_record['title'] = line[6:]  
+            elif line.startswith("PEPMASS="):  
+                parts = line[8:].split()  
+                if parts:  
+                    current_record['pepmass'] = float(parts[0])  
+            elif line.startswith("CHARGE="):  
+                charge_str = line[7:].replace('+', '')  
+                current_record['charge'] = int(charge_str)  
+            elif line.startswith("SEQ="):  
+                current_record['peptide'] = line[4:]  
+            elif re.match(r'^\d', line):  
+                parts = line.split()  
+                if len(parts) >= 2:  
+                    mz = float(parts[0])  
+                    intensity = float(parts[1])  
+                    current_record['mz_array'].append(mz)  
+                    current_record['intensity_array'].append(intensity)  
+      
+    return records  
   
 def match_fragments(ms2_spec, mgf_record, tolerance=0.5):  
     """  
     Matches fragments between an MS2 spectrum and an MGF record.  
-    Returns a dictionary with matching indices.  
+    Returns indices of matching fragments.  
     """  
     ms2_indices = []  
     mgf_indices = []  
@@ -219,26 +224,22 @@ if uploaded_mzml is not None:
         )  
         st.plotly_chart(fig_tic, use_container_width=True)  
           
-        # XIC Extraction  
+        # XIC Visualization  
         st.header("Extracted Ion Chromatogram (XIC)")  
-        col1, col2 = st.columns(2)  
-        with col1:  
-            xic_mass = st.number_input("m/z value", min_value=50.0, max_value=2000.0, value=500.0, step=0.1)  
-        with col2:  
-            xic_tol = st.number_input("Tolerance (Da)", min_value=0.01, max_value=10.0, value=0.5, step=0.1)  
-          
-        xic_times, xic_intensities = extract_xic(experiment, xic_mass, xic_tol)  
+        mass_value = st.number_input("Enter target m/z value:", value=500.0, step=1.0)  
+        tol = st.number_input("Enter tolerance (Da):", value=0.5, step=0.1)  
+        xic_times, xic_intensities = extract_xic(experiment, mass_value, tol)  
           
         fig_xic = go.Figure()  
         fig_xic.add_trace(go.Scatter(  
             x=xic_times,  
             y=xic_intensities,  
-            mode='lines',  
+            mode='lines+markers',  
             line=dict(color="#24EB84", width=2),  
-            name=f"XIC (m/z {xic_mass}±{xic_tol})"  
+            name="XIC"  
         ))  
         fig_xic.update_layout(  
-            title={"text": f"Extracted Ion Chromatogram (m/z {xic_mass}±{xic_tol})", "pad": {"t":15}},  
+            title={"text": "Extracted Ion Chromatogram", "pad": {"t":15}},  
             xaxis_title="Retention Time",  
             yaxis_title="Intensity",  
             template="simple_white",  
@@ -247,112 +248,92 @@ if uploaded_mzml is not None:
         )  
         st.plotly_chart(fig_xic, use_container_width=True)  
           
-        # MS2 Spectra Visualization  
-        st.header("MS2 Spectra")  
+        # MS2 Spectrum Display  
+        st.header("MS2 Fragmentation Analysis")  
         ms2_data = extract_ms2_data(experiment)  
-        if ms2_data:  
-            ms2_idx = st.selectbox("Select an MS2 spectrum", list(range(len(ms2_data))))  
-            selected_ms2 = ms2_data[ms2_idx]  
-            st.write(f"Selected MS2 Spectrum - Precursor m/z: {selected_ms2['precursor']}, RT: {selected_ms2['rt']}")  
-              
-            fig_ms2 = go.Figure()  
-            fig_ms2.add_trace(go.Bar(  
-                x=selected_ms2['mz'],  
-                y=selected_ms2['intensity'],  
-                marker_color="#B2EB24"  
-            ))  
-            fig_ms2.update_layout(  
-                title={"text": "MS2 Fragmentation Spectrum", "pad": {"t":15}},  
-                xaxis_title="m/z",  
-                yaxis_title="Intensity",  
-                template="simple_white",  
-                xaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
-                yaxis=dict(showgrid=True, gridcolor="#F3F4F6")  
-            )  
-            st.plotly_chart(fig_ms2, use_container_width=True)  
-        else:  
-            st.info("No MS2 spectra found in the uploaded mzML file.")  
           
-        # MGF Fragmentation Matching Section  
-        st.header("MGF Fragmentation Matching")  
-        uploaded_mgf = st.file_uploader("Upload an MGF file", type=["mgf"], key="mgfUploader")  
-        if uploaded_mgf is not None:  
+        if ms2_data:  
+            # Let user pick a spectrum based on retention time  
+            options = [f"RT: {spec['rt']:.2f}, Precursor m/z: {spec['precursor']:.4f}" for spec in ms2_data]  
+            choice = st.selectbox("Select an MS2 spectrum to view:", options)  
+              
+            # Get the selected spectrum  
+            selected_index = options.index(choice)  
+            selected_ms2 = ms2_data[selected_index]  
+              
+            # Check if the selected MS2 spectrum has valid data  
+            if len(selected_ms2['mz']) > 0 and len(selected_ms2['intensity']) > 0:  
+                # Plot MS2 spectrum  
+                fig_ms2 = go.Figure()  
+                fig_ms2.add_trace(go.Bar(  
+                    x=selected_ms2['mz'],  
+                    y=selected_ms2['intensity'],  
+                    marker_color="#B2EB24"  
+                ))  
+                fig_ms2.update_layout(  
+                    title={"text": "MS2 Fragmentation Spectrum", "pad": {"t":15}},  
+                    xaxis_title="m/z",  
+                    yaxis_title="Intensity",  
+                    template="simple_white",  
+                    xaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
+                    yaxis=dict(showgrid=True, gridcolor="#F3F4F6")  
+                )  
+                st.plotly_chart(fig_ms2, use_container_width=True)  
+                  
+                # Display data table  
+                df = pd.DataFrame({  
+                    'm/z': selected_ms2['mz'],  
+                    'Intensity': selected_ms2['intensity']  
+                })  
+                st.dataframe(df)  
+            else:  
+                st.warning("The selected MS2 spectrum does not contain any peaks.")  
+        else:  
+            st.warning("No MS2 spectra found in the file.")  
+          
+        # MGF Matching  
+        st.header("MGF Matching")  
+        uploaded_mgf = st.file_uploader("Upload an MGF file for fragment matching", type=["mgf"])  
+          
+        if uploaded_mgf is not None and ms2_data:  
             try:  
-                st.info("Parsing MGF file...")  
-                mgf_bytes = uploaded_mgf.getvalue()  
-                mgf_records = parse_mgf(mgf_bytes)  
-                if mgf_records:  
-                    st.success(f"MGF file parsed successfully! Found {len(mgf_records)} records.")  
+                mgf_content = uploaded_mgf.read().decode('utf-8')  
+                records = parse_mgf(mgf_content)  
+                  
+                if records:  
+                    # Use the first MS2 spectrum for matching  
+                    ms2_spec = ms2_data[0]  
+                    record = records[0]  
                       
-                    mgf_idx = st.selectbox("Select an MGF record", list(range(len(mgf_records))), key="mgfSelect")  
-                    record = mgf_records[mgf_idx]  
-                    st.write(f"Peptide Mass (precursor): {record.get('pepmass', 'N/A')}")  
-                    st.write(f"Charge: {record.get('charge', 'N/A')}")  
-                      
-                    fig_mgf = go.Figure()  
-                    fig_mgf.add_trace(go.Bar(  
-                        x=record["mz_array"],  
-                        y=record["intensity_array"],  
-                        marker_color="#EB3424"  
-                    ))  
-                    fig_mgf.update_layout(  
-                        title={"text": "MGF Fragmentation Pattern", "pad": {"t":15}},  
-                        xaxis_title="m/z",  
-                        yaxis_title="Intensity",  
-                        template="simple_white",  
-                        xaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
-                        yaxis=dict(showgrid=True, gridcolor="#F3F4F6")  
-                    )  
-                    st.plotly_chart(fig_mgf, use_container_width=True)  
-                      
-                    # Fragmentation matching  
-                    if ms2_data:  
-                        st.subheader("Fragment Matching")  
-                        match_tol = st.number_input("Matching tolerance (Da)", min_value=0.01, max_value=2.0, value=0.5, step=0.1, key="matchTol")  
+                    if len(record.get("mz_array", [])) > 0:  
+                        # Define tolerance in Da for matching  
+                        tolerance = st.number_input("Set mass tolerance (Da):", value=0.5, step=0.1)  
                           
-                        ms2_match_idx = st.selectbox("Select MS2 spectrum for matching", list(range(len(ms2_data))), key="ms2MatchSelect")  
-                        ms2_spec = ms2_data[ms2_match_idx]  
-                          
-                        match_results = match_fragments(ms2_spec, record, match_tol)  
+                        match_results = match_fragments(ms2_spec, record, tolerance)  
                           
                         if match_results['ms2_indices']:  
-                            st.success(f"Found {len(match_results['ms2_indices'])} matching fragments!")  
+                            st.success("Matching fragments found!")  
                               
-                            # Create a visualization of the matches  
+                            # Plot the matching on the MS2 spectrum plot  
+                            match_marker = dict(color="#EB3424", size=10, symbol="circle-open")  
                             fig_match = go.Figure()  
-                              
-                            # MS2 spectrum (positive y-axis)  
-                            fig_match.add_trace(go.Bar(  
+                            fig_match.add_trace(go.Scatter(  
                                 x=ms2_spec['mz'],  
                                 y=ms2_spec['intensity'],  
-                                name="MS2 Spectrum",  
-                                marker_color="#B2EB24"  
+                                mode="markers",  
+                                marker=dict(color="#2563EB", size=8),  
+                                name="MS2 peaks"  
                             ))  
-                              
-                            # MGF spectrum (negative y-axis for comparison)  
-                            fig_match.add_trace(go.Bar(  
-                                x=record['mz_array'],  
-                                y=-record['intensity_array'],  # Negative for display below x-axis  
-                                name="MGF Spectrum",  
-                                marker_color="#EB3424"  
+                            # Add markers for matched fragments  
+                            fig_match.add_trace(go.Scatter(  
+                                x=[ms2_spec['mz'][i] for i in match_results['ms2_indices']],  
+                                y=[ms2_spec['intensity'][i] for i in match_results['ms2_indices']],  
+                                mode="markers",  
+                                marker=match_marker,  
+                                name="Matched fragments"  
                             ))  
-                              
-                            # Add lines connecting matching fragments  
-                            for i, j in zip(match_results['ms2_indices'], match_results['mgf_indices']):  
-                                ms2_mz = ms2_spec['mz'][i]  
-                                ms2_intensity = ms2_spec['intensity'][i]  
-                                mgf_mz = record['mz_array'][j]  
-                                mgf_intensity = -record['intensity_array'][j]  # Negative for display  
-                                  
-                                fig_match.add_shape(  
-                                    type="line",  
-                                    x0=ms2_mz, y0=ms2_intensity,  
-                                    x1=mgf_mz, y1=mgf_intensity,  
-                                    line=dict(color="#2563EB", width=1, dash="dot")  
-                                )  
-                              
                             fig_match.update_layout(  
-                                title={"text": "Fragment Matching Visualization", "pad": {"t":15}},  
+                                title={"text":"MS2 Spectrum with Matching Fragments", "pad": {"t":15}},  
                                 xaxis_title="m/z",  
                                 yaxis_title="Intensity",  
                                 template="simple_white",  
@@ -372,6 +353,8 @@ if uploaded_mzml is not None:
                             st.dataframe(match_df)  
                         else:  
                             st.warning("No matching fragments found with the current tolerance.")  
+                    else:  
+                        st.error("No valid m/z values found in the MGF file.")  
                 else:  
                     st.error("No valid records found in the MGF file.")  
             except Exception as e:  
