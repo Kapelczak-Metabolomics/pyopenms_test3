@@ -179,6 +179,19 @@ def match_fragments(ms2_spec, mgf_record, tolerance=0.5):
         'mgf_indices': mgf_indices  
     }  
   
+def create_stem_data(x, y):  
+    """  
+    Prepares data to simulate a stem (stick) plot.  
+    For each point, create two points: one at y=0 and one at the actual intensity,  
+    with None added to separate the lines.  
+    """  
+    x_stem = []  
+    y_stem = []  
+    for xi, yi in zip(x, y):  
+        x_stem += [xi, xi, None]  
+        y_stem += [0, yi, None]  
+    return x_stem, y_stem  
+  
 # -------------------------------------------------------------------  
 # Main App  
   
@@ -249,7 +262,7 @@ if uploaded_mzml is not None:
         )  
         st.plotly_chart(fig_xic, use_container_width=True)  
           
-        # MS2 Spectrum Display with Centroid Bars  
+        # MS2 Spectrum Display with Stem Plot  
         st.header("MS2 Fragmentation Analysis")  
         ms2_data = extract_ms2_data(experiment)  
         if ms2_data:  
@@ -261,26 +274,25 @@ if uploaded_mzml is not None:
               
             # Validate and plot the selected MS2 spectrum  
             if len(selected_ms2['mz']) > 0 and len(selected_ms2['intensity']) > 0:  
-                # Plot MS2 spectrum using bar chart for centroid representation  
-                fig_ms2 = go.Figure()  
+                # Create stem plot data  
+                x_stem, y_stem = create_stem_data(selected_ms2['mz'], selected_ms2['intensity'])  
                   
-                # Use bar chart for centroid representation  
-                fig_ms2.add_trace(go.Bar(  
-                    x=selected_ms2['mz'],  
-                    y=selected_ms2['intensity'],  
-                    marker=dict(color="#B2EB24", line=dict(width=0)),  
-                    width=0.5,  # Adjust width of bars for better visualization  
+                # Plot MS2 spectrum as stem plot  
+                fig_ms2 = go.Figure()  
+                fig_ms2.add_trace(go.Scatter(  
+                    x=x_stem,  
+                    y=y_stem,  
+                    mode='lines',  
+                    line=dict(color="#B2EB24", width=1.5),  
                     name="MS2 Peaks"  
                 ))  
-                  
                 fig_ms2.update_layout(  
                     title={"text": "MS2 Fragmentation Spectrum", "pad": {"t":15}},  
                     xaxis_title="m/z",  
                     yaxis_title="Intensity",  
                     template="simple_white",  
                     xaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
-                    yaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
-                    bargap=0.99  # Adjust gap between bars  
+                    yaxis=dict(showgrid=True, gridcolor="#F3F4F6")  
                 )  
                 st.plotly_chart(fig_ms2, use_container_width=True)  
             else:  
@@ -316,25 +328,27 @@ if uploaded_mzml is not None:
                                 # Plot matches on the MS2 spectrum  
                                 fig_match = go.Figure()  
                                   
-                                # Plot all MS2 peaks as bars  
-                                fig_match.add_trace(go.Bar(  
-                                    x=selected_ms2['mz'],  
-                                    y=selected_ms2['intensity'],  
-                                    marker=dict(color="#B2EB24", line=dict(width=0)),  
-                                    width=0.5,  
+                                # Plot all MS2 peaks as stem plot  
+                                x_stem, y_stem = create_stem_data(selected_ms2['mz'], selected_ms2['intensity'])  
+                                fig_match.add_trace(go.Scatter(  
+                                    x=x_stem,  
+                                    y=y_stem,  
+                                    mode='lines',  
+                                    line=dict(color="#B2EB24", width=1.5),  
                                     name="MS2 Peaks"  
                                 ))  
                                   
-                                # Highlight matched peaks  
+                                # Highlight matched peaks with a different color  
                                 matched_mz = [selected_ms2['mz'][i] for i in match_results['ms2_indices']]  
                                 matched_intensity = [selected_ms2['intensity'][i] for i in match_results['ms2_indices']]  
                                   
-                                # Add matched peaks as a separate bar trace with different color  
-                                fig_match.add_trace(go.Bar(  
-                                    x=matched_mz,  
-                                    y=matched_intensity,  
-                                    marker=dict(color="#EB3424", line=dict(width=1, color="#EB3424")),  
-                                    width=0.5,  
+                                # Create stem plot for matched peaks  
+                                x_matched_stem, y_matched_stem = create_stem_data(matched_mz, matched_intensity)  
+                                fig_match.add_trace(go.Scatter(  
+                                    x=x_matched_stem,  
+                                    y=y_matched_stem,  
+                                    mode='lines',  
+                                    line=dict(color="#EB3424", width=2.5),  
                                     name="Matched Fragments"  
                                 ))  
                                   
@@ -344,9 +358,7 @@ if uploaded_mzml is not None:
                                     yaxis_title="Intensity",  
                                     template="simple_white",  
                                     xaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
-                                    yaxis=dict(showgrid=True, gridcolor="#F3F4F6"),  
-                                    bargap=0.99,  
-                                    barmode='overlay'  # Overlay bars for better visualization of matches  
+                                    yaxis=dict(showgrid=True, gridcolor="#F3F4F6")  
                                 )  
                                 st.plotly_chart(fig_match, use_container_width=True)  
                                   
